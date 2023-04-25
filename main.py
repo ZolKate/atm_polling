@@ -1,56 +1,63 @@
 from fastapi import FastAPI
 import uvicorn
 from dataclasses import dataclass
-from typing import Set, Optional
+from typing import Dict, Optional, Type
 import asyncio
-from pydantic import BaseModel
 
 
 app = FastAPI()
-event = asyncio.Event()
 
 @dataclass
 class Transaction:
-    transactions: Optional[Set[str]]
+    id_invoice: str
+    event: Type[asyncio.Event]
 
-    def add(self, id:str):
-        self.transactions.add(id)
-    
-    def remove(self, id: str):
-        self.transactions.remove(id)
-    
-    def validate(self, id: str):
-        return id in self.transactions
+class TransactionController:
+    transactions: Optional[Dict[str, Transaction]]
+
+    def __init__(self) -> None:
+        self.transactions = dict()
+
+    def add(self, invoice: Transaction):
+        self.transactions[invoice.id_invoice] = invoice
+
+    def remove(self, invoice: Transaction):
+        del self.transactions[invoice.id_invoice]
+
+    def validate(self, id:str):
+        if id in self.transactions:
+            return self.transactions[id]
     
     def is_empty(self):
         return len(self.transactions) == 0
-    
-id_set = Transaction(set())
+        
+
+invoices = TransactionController()
 
 @app.get("/new_invoice/{id}")
 async def get_new_invoice(id:str):
-    print("Ожидание оплаты...")
     try:
-        id_set.add(id)
-        await asyncio.wait_for(event.wait(), timeout=30)
+        invoice = Transaction(id, asyncio.Event())
+        invoices.add(invoice)
+        await asyncio.wait_for(invoice.event.wait(), timeout=30)
     except asyncio.TimeoutError:
         return "Время ожидания привязки оплаты закончилось"
-    if event.is_set():
-        id_set.remove(id)
-        event.clear()
+    
+    if invoice.event.is_set():
+        invoices.remove(invoice)
+        invoice.event.clear()
         return "Оплата прошла"
 
 @app.get("/pay/{id}")
 async def get_pay(id:str):
-    print("Происходит оплата ...")
-    if id_set.is_empty():
+    if invoices.is_empty():
         return "Транзакций открытых нет"
-    if id_set.validate(id):
-        event.set()
+    invoice = invoices.validate(id)
+    if invoice:
+        invoice.event.set()
     else: 
         return "Идентификаторы не сходятся"
 
 if __name__ == "__main__":
-    
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
 
