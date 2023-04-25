@@ -1,10 +1,18 @@
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi_utils.inferring_router import InferringRouter
 from fastapi_utils.cbv import cbv
-import uvicorn
 from dataclasses import dataclass
 from typing import Dict, Optional, Type
+import uvicorn
 import asyncio
+
+responses = {
+    400: {"message":"Время ожидания привязки оплаты закончилось"},
+    404: {"message":"Транзакций открытых нет"},
+    405: {"message":"Идентификаторы не сходятся"},
+    200: {"message":"Оплата прошла успешно"}
+}
 
 @dataclass
 class Transaction:
@@ -23,11 +31,11 @@ class TransactionController:
     def remove(self, invoice: Transaction):
         del self.transactions[invoice.id_invoice]
 
-    def validate(self, id:str):
+    def validate(self, id:str)->Transaction:
         if id in self.transactions:
             return self.transactions[id]
     
-    def is_empty(self):
+    def is_empty(self) -> bool:
         return len(self.transactions) == 0
         
 app = FastAPI()
@@ -44,22 +52,23 @@ class App:
             self.invoices.add(invoice)
             await asyncio.wait_for(invoice.event.wait(), timeout=30)
         except asyncio.TimeoutError:
-            return "Время ожидания привязки оплаты закончилось"
+            return JSONResponse(status_code=400, content={"transaction_id": id, "status": responses[400]})
         
         if invoice.event.is_set():
             self.invoices.remove(invoice)
             invoice.event.clear()
-            return "Оплата прошла"
+            return JSONResponse(status_code=200, content={"transaction_id": id, "status": responses[200]})
 
     @router.get("/pay/{id}")
     async def get_pay(self,id:str):
         if self.invoices.is_empty():
-            return "Транзакций открытых нет"
+            return JSONResponse(status_code=404, content={"pay_id": id, "status": responses[404]})
         invoice = self.invoices.validate(id)
         if invoice:
             invoice.event.set()
+            return JSONResponse(status_code=200, content={"pay_id": id, "status": responses[200]})
         else: 
-            return "Идентификаторы не сходятся"
+            return JSONResponse(status_code=405, content={"pay_id": id, "status": responses[405]})
 
 app.include_router(router)
 
