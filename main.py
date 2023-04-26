@@ -10,7 +10,7 @@ import asyncio
 responses = {
     400: {"message":"Время ожидания привязки оплаты закончилось"},
     404: {"message":"Транзакций открытых нет"},
-    405: {"message":"Идентификаторы не сходятся"},
+    405: {"message":"Нет открытых транзакций с таким идентификатором"},
     200: {"message":"Оплата прошла успешно"}
 }
 
@@ -32,7 +32,7 @@ class TransactionController:
         del self.transactions[invoice.id_invoice]
 
     def validate(self, id:str)->Transaction:
-        if id in self.transactions:
+        if id in self.transactions.keys():
             return self.transactions[id]
     
     def is_empty(self) -> bool:
@@ -51,22 +51,19 @@ class App:
             invoice = Transaction(id, asyncio.Event())
             self.invoices.add(invoice)
             await asyncio.wait_for(invoice.event.wait(), timeout=30)
-        except asyncio.TimeoutError:
-            return JSONResponse(status_code=400, content={"transaction_id": id, "status": responses[400]})
-        
-        if invoice.event.is_set():
             self.invoices.remove(invoice)
-            invoice.event.clear()
             return JSONResponse(status_code=200, content={"transaction_id": id, "status": responses[200]})
+        except asyncio.TimeoutError:
+            self.invoices.remove(invoice)
+            return JSONResponse(status_code=400, content={"transaction_id": id, "status": responses[400]})  
+           
 
     @router.get("/pay/{id}")
     async def get_pay(self,id:str):
-        if self.invoices.is_empty():
-            return JSONResponse(status_code=404, content={"pay_id": id, "status": responses[404]})
         invoice = self.invoices.validate(id)
         if invoice:
             invoice.event.set()
-            return JSONResponse(status_code=200, content={"pay_id": id, "status": responses[200]})
+            return JSONResponse(status_code=200, content={"transaction_id": invoice.id_invoice, "status": responses[200]})
         else: 
             return JSONResponse(status_code=405, content={"pay_id": id, "status": responses[405]})
 
