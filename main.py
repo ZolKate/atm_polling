@@ -40,18 +40,14 @@ async def get_new_invoice(id:str):
         invoice = Transaction(id, asyncio.Event())
         invoices.add(invoice)
         await asyncio.wait_for(invoice.event.wait(), timeout=30)
-    except asyncio.TimeoutError:
-        return "Время ожидания привязки оплаты закончилось"
-    
-    if invoice.event.is_set():
         invoices.remove(invoice)
-        invoice.event.clear()
         return "Оплата прошла"
+    except asyncio.TimeoutError:
+        invoices.remove(invoice)
+        return "Время ожидания привязки оплаты закончилось"
 
 @app.get("/pay/{id}")
 async def get_pay(id:str):
-    if invoices.is_empty():
-        return "Транзакций открытых нет"
     invoice = invoices.validate(id)
     if invoice:
         invoice.event.set()
